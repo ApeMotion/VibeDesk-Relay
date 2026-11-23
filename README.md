@@ -32,6 +32,8 @@ curl -fsSLo vibedesk-relay-install.sh https://raw.githubusercontent.com/ApeMotio
 
 | 现象 | 检查方法 |
 | --- | --- |
+| 取回配置时提示 `Permission denied (publickey)` | 在 Mac 上使用能登录 VPS 的 SSH 用户和地址。如果登录用 `ssh -i ~/.ssh/my_vps_key`，把取件命令中的 `scp -p` 改为 `scp -p -i ~/.ssh/my_vps_key`，换成自己的私钥路径。 |
+| 在 VPS 运行 Compose 提示 `no configuration file provided` | 先执行 `cd /opt/vibedesk-relay`。该目录包含 `compose.yaml` 和 `.env`，可在这里运行 `docker compose ps`、查看设备或日志。 |
 | HTTPS 健康检查失败 | 检查 DNS 指向、云防火墙 TCP 8443 和域名证书。运行 `docker compose logs --tail 80 relay` 查看启动错误。 |
 | 本机测试成功，两台设备连不上 | 确认两端使用同一台中转签发的**不同授权文件**，被控端允许中转连入，并从「互联网 P2P」分组发起连接。 |
 | 设备列表显示在线，连接时提示被控端离线 | 唤醒被控电脑并打开 VibeDesk。等正在使用的会话结束后，在被控端将「允许远程控制」关闭再打开，重新向协调服务注册，然后重试。 |
@@ -51,6 +53,7 @@ python3 check_access.py controller.vibedesk-relay.json --transport tls
 在服务器上进入 `/opt/vibedesk-relay`，以有 Docker 管理权限的账号操作。前两条命令查看设备和使用情况；最后一条用于撤销指定设备，执行前将 `DEVICE_ID` 替换为 `list` 中的设备 ID。
 
 ```sh
+cd /opt/vibedesk-relay
 docker compose exec -T relay python3 /opt/vibedesk/relay.py list
 docker compose exec -T relay python3 /opt/vibedesk/relay.py status
 docker compose exec -T relay python3 /opt/vibedesk/relay.py revoke DEVICE_ID
