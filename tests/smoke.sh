@@ -43,4 +43,4 @@ for attempt in range(30):
             raise
         time.sleep(1)
 PY
-"$runtime" exec -i "$name" python3 - < tests/test_local.py
+"$runtime" exec -i "$name" python3 - < tests/container_smoke.py

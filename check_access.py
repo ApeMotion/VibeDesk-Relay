@@ -4,11 +4,13 @@ import contextlib
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import socket
 import ssl
 import struct
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -104,6 +106,54 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def read_object(source):
+    data = source.read(16385)
+    if len(data) > 16384:
+        raise ValueError("Relay JSON exceeds 16 KiB")
+    value = json.loads(data)
+    if not isinstance(value, dict):
+        raise ValueError("Expected a relay JSON object")
+    return value
+
+
+def grant_endpoint(config):
+    if type(config.get("version")) is not int or config["version"] != 1:
+        raise ValueError("Unsupported device configuration version")
+    if not all(isinstance(config.get(field), str) for field in ("name", "token", "serviceId", "endpoint")):
+        raise ValueError("Invalid device configuration fields")
+    if not (1 <= len(config["name"]) <= 120 and re.fullmatch(r"[A-Za-z0-9_-]{43}", config["token"])):
+        raise ValueError("Invalid relay name or device token")
+    if not re.fullmatch(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", config["serviceId"], re.I):
+        raise ValueError("Invalid relay service ID")
+    endpoint = config["endpoint"]
+    url = urllib.parse.urlsplit(endpoint)
+    if (url.scheme != "https" or not url.hostname or url.username is not None or url.password is not None
+            or url.path not in ("", "/") or "?" in endpoint or "#" in endpoint):
+        raise ValueError("Invalid HTTPS endpoint")
+    return url
+
+
+def device_ice_server(lease, service_id, host):
+    if lease.get("serviceId") != service_id:
+        raise ValueError("Service identity mismatch")
+    if lease.get("sessionId") is not None or lease.get("peerAccessId") is not None:
+        raise ValueError("Expected a lease for this device only")
+    expiry = lease.get("expiresAt")
+    if not isinstance(expiry, (int, float)) or not math.isfinite(expiry) or expiry <= time.time() + 10:
+        raise ValueError("Missing or expired relay credentials")
+    servers = lease.get("iceServers")
+    if not isinstance(servers, list) or len(servers) != 1 or not isinstance(servers[0], dict):
+        raise ValueError("Expected one TURN server")
+    server = servers[0]
+    if not all(isinstance(server.get(field), str) and server[field] for field in ("username", "credential")):
+        raise ValueError("Missing TURN username or credential")
+    urls = server.get("urls")
+    expected = {f"turn:{host}:3478?transport=udp", f"turns:{host}:5349?transport=tcp"}
+    if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls) or set(urls) != expected:
+        raise ValueError("Advertised TURN URLs do not match the relay endpoint")
+    return server
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("configuration")
@@ -111,24 +161,18 @@ def main():
     parser.add_argument("--transport", choices=["udp", "tls", "both"], default="both")
     args = parser.parse_args()
     with open(args.configuration, "rb") as source:
-        data = source.read(16385)
-    if len(data) > 16384:
-        raise ValueError("Configuration exceeds 16 KiB")
-    config = json.loads(data)
-    if config.get("version") != 1 or not re.fullmatch(r"[A-Za-z0-9_-]{43}", config.get("token", "")):
-        raise ValueError("Invalid device configuration")
-    url = urllib.parse.urlsplit(config["endpoint"])
-    if url.scheme != "https" or not url.hostname or url.username or url.password or url.path not in ["", "/"] or url.query or url.fragment:
-        raise ValueError("Invalid HTTPS endpoint")
+        config = read_object(source)
+    url = grant_endpoint(config)
     context = ssl.create_default_context(cafile=args.ca)
     opener = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPSHandler(context=context))
     req = urllib.request.Request(config["endpoint"].rstrip("/") + "/v1/credentials", headers={"Authorization": "Bearer " + config["token"]})
     with opener.open(req, timeout=5) as response:
-        lease = json.loads(response.read(16385))
-    if lease["serviceId"] != config["serviceId"]:
-        raise ValueError("Service identity mismatch")
+        if response.status != 200:
+            raise ValueError(f"Credentials endpoint returned HTTP {response.status}")
+        lease = read_object(response)
+    server = device_ice_server(lease, config["serviceId"], url.hostname)
     for protocol in (["udp", "tls"] if args.transport == "both" else [args.transport]):
-        allocation(lease["iceServers"][0], url.hostname, url.hostname, context, protocol == "tls")
+        allocation(server, url.hostname, url.hostname, context, protocol == "tls")
         print(f"TURN/{protocol.upper()} authenticated allocation OK")
 
 

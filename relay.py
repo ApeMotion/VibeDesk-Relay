@@ -53,6 +53,8 @@ def initialize():
             shutil.copyfile("/var/lib/coturn/turndb", seed.name)
             os.link(seed.name, ROOT / "relay.sqlite")
     with database() as db:
+        # coturn reads keys on a separate connection while devices renew leases.
+        db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
         columns = {row[1] for row in db.execute("PRAGMA table_info(leases)")}
         for column in ("peer", "connection"):
@@ -71,12 +73,15 @@ def domain():
 def grant(label):
     if not label.strip() or len(label) > 80 or not label.isprintable():
         raise ValueError("Device name must be 1–80 printable characters")
+    host = domain()
+    # Clients limit the display name to 120 characters; keep the full endpoint.
+    name = host if len(host) <= 120 else "…" + host[-119:]
     token = secrets.token_urlsafe(32)
     with database() as db:
         service_id, = db.execute("SELECT uuid FROM service").fetchone()
         db.execute("INSERT INTO devices(user,label,token_hash) VALUES(?,?,?)",
                    ("vd" + uuid.uuid4().hex, label, hashlib.sha256(token.encode()).hexdigest()))
-    return dict(version=1, serviceId=service_id, name=domain(), endpoint="https://" + domain() + ":8443", token=token)
+    return dict(version=1, serviceId=service_id, name=name, endpoint=f"https://{host}:8443", token=token)
 
 
 def credentials(token, peer_access=None, connection=None, nonce=None):

@@ -2,11 +2,11 @@
 
 在自己的 Linux VPS 上部署 VibeDesk 中转，让两台设备在无法直连时仍能远程连接。VibeDesk 客户端继续通过现有账号和协调服务建立会话，通过 HTTPS 向你的服务器申请短期凭据，再经 coturn 转发加密的远控流量。设备授权、撤销和流量费用由服务器所有者管理。
 
-以下以 **一台全新的 Debian 13 VPS 和两台 Mac** 为例。服务器有固定公网 IPv4；两台设备已安装带有「自建中转」入口的 VibeDesk，并登录同一账号。其他 Linux 发行版准备好 Docker Engine、Docker Compose v2 和 Certbot 后，可以从克隆仓库开始。
+以下以 **一台全新的 Debian 13 VPS 和两台 Mac** 为例。服务器有固定公网 IPv4，两台设备都需要带有「自建中转」入口的 VibeDesk，并登录同一账号。Apple 芯片 Mac 可使用官网的 macOS 1.1.2 build 2。其他 Linux 发行版准备好 Docker Engine、Docker Compose v2 和 Certbot 后，可以从克隆仓库开始。[VibeDesk 客户端下载](https://vibedesk.app/downloads.html)
 
 ## 1. 配置域名和防火墙
 
-为中转选一个域名，例如 `relay.example.com`，将它的 **A 记录**指向 VPS 的公网 IPv4。用 Cloudflare 管理 DNS 时选择 **仅 DNS（DNS only）**。在云安全组和主机防火墙开放下列端口。
+为中转选一个域名，例如 `relay.example.com`，将它的 **A 记录**指向 VPS 的公网 IPv4。此部署监听 IPv4，选用只有 A 记录的主机名可避免证书验证和客户端连接被旧的 AAAA 记录引向其他服务器。用 Cloudflare 管理 DNS 时选择 **仅 DNS（DNS only）**。在云安全组和主机防火墙开放下列端口。
 
 | 协议与端口 | 用途 |
 | --- | --- |
@@ -66,26 +66,34 @@ curl --fail --retry 8 --retry-connrefused --retry-delay 2 \
 
 ## 4. 给两台设备分别授权
 
-**每台设备一份 JSON。** 以下命令分别授权控制端和被控端。文件名是管理标签，两台设备可以都是 Mac。这段命令可重复执行，已经写好的授权文件会保留。
+**每台设备一份 JSON。** 以下命令在 VPS 上以你平时的 SSH 登录账号执行。如果之前用 `sudo -i` 切到了 root，先用 `exit` 回到原账号。授权文件保存在该账号的私有目录，管理员可用同一账号取回。同一服务重复执行时会保留已有文件。若已重建服务数据卷，先将旧的授权目录改名归档，以便生成与新服务匹配的文件。
 
 ```sh
-cd /opt/vibedesk-relay
 umask 077
-grant_dir=/root/vibedesk-relay-grants
+grant_dir="$HOME/vibedesk-relay-grants"
 install -d -m 0700 "$grant_dir"
+if [ "$(id -u)" -eq 0 ]; then
+  compose() { docker compose "$@"; }
+else
+  compose() { sudo docker compose "$@"; }
+fi
 for device in controller host; do
   file="$grant_dir/$device.vibedesk-relay.json"
   if [ ! -s "$file" ]; then
-    docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "$device" > "$file.tmp" &&
+    compose --env-file /opt/vibedesk-relay/.env -f /opt/vibedesk-relay/compose.yaml \
+      exec -T relay python3 /opt/vibedesk/relay.py grant "$device" > "$file.tmp" &&
       mv "$file.tmp" "$file"
   fi
 done
 ```
 
-将每份 JSON 私下交给对应的设备持有人。举例，在控制端 Mac 的终端执行下列命令。把 `relay.example.com` 换成服务器登录地址；SSH 使用指定私钥时给 `scp` 加上 `-i 私钥路径`。在被控端同样操作，文件名换成 `host.vibedesk-relay.json`。
+在管理员自己的 Mac 上，使用刚才的 SSH 用户名和地址替换下方的 `admin@relay.example.com`。远程文件路径相对于该账号的家目录。两份文件取回后，将 `controller` 留给控制端，将 `host` 通过隔空投送等私密方式交给被控端。设备持有人只需要各自的文件。SSH 使用指定私钥时可给 `scp` 加上 `-i 私钥路径`。
 
 ```sh
-scp root@relay.example.com:/root/vibedesk-relay-grants/controller.vibedesk-relay.json ~/Downloads/
+dest="$HOME/Downloads/relay.example.com"
+mkdir -p -m 700 "$dest"
+scp -p admin@relay.example.com:vibedesk-relay-grants/controller.vibedesk-relay.json \
+       admin@relay.example.com:vibedesk-relay-grants/host.vibedesk-relay.json "$dest/"
 ```
 
 ## 5. 在 VibeDesk 中验证连接
@@ -103,6 +111,7 @@ scp root@relay.example.com:/root/vibedesk-relay-grants/controller.vibedesk-relay
 | --- | --- |
 | HTTPS 健康检查失败 | 检查 DNS 指向、云防火墙 TCP 8443 和域名证书。运行 `docker compose logs --tail 80 relay` 查看启动错误。 |
 | 本机测试成功，两台设备连不上 | 确认两端使用同一台中转签发的**不同授权文件**，被控端允许中转连入，并从「互联网 P2P」分组发起连接。 |
+| 设备列表显示在线，连接时提示被控端离线 | 唤醒被控电脑并打开 VibeDesk。等正在使用的会话结束后，在被控端将「允许远程控制」关闭再打开，重新向协调服务注册，然后重试。 |
 | 提示协调服务需更新 | 核对客户端版本和账号协调服务兼容性。重建中转不会更新账号协调服务。 |
 | 能获取凭据，但无画面 | 从 VPS 以外的网络运行下方测试，分别核对 UDP 3478 与 TCP 5349。若两项都成功，再检查中转 UDP 端口范围的双向放行及公网 NAT 映射。 |
 | 设备授权被拒绝 | 在 VPS 运行下文的 `list`，核对设备是否被撤权；轮换授权后需在对应客户端重新导入并保存。 |
@@ -132,7 +141,7 @@ docker compose exec -T relay python3 /opt/vibedesk/relay.py revoke DEVICE_ID
 
 ## 本地测试
 
-运行独立测试需要 OpenSSL，以及 Docker 或 macOS 上的 [Apple container](https://github.com/apple/container)。在仓库根目录选择对应命令。测试会构建镜像，在临时容器内检查 UDP/TLS、双向数据、配额、凭据续期与撤权，不发布宿主机端口。
+运行 `python3 -m unittest discover -s tests` 可检查授权文件和凭据格式。验证实际转发还需要 OpenSSL，以及 Docker 或 macOS 上的 [Apple container](https://github.com/apple/container)。在仓库根目录选择对应命令。测试会构建镜像，在临时容器内检查 UDP/TLS、双向数据、配额、凭据续期与撤权，不发布宿主机端口。
 
 ```sh
 # Linux

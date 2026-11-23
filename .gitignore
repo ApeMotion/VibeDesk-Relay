@@ -5,6 +5,7 @@ certs/
 grants/
 backups/
 *.vibedesk-relay.json
+*.vibedesk-relay.json.tmp
 *.pem
 *.key
 *.sqlite*
