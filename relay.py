@@ -327,8 +327,10 @@ def main():
         revoke(args.device_id)
     elif args.action == "status":
         report = cli(["ps"])[0]
+        with database() as db:
+            service_id, = db.execute("SELECT uuid FROM service").fetchone()
         usage = re.findall(r"usage: rp=\d+, rb=(\d+), sp=\d+, sb=(\d+)", report)
-        print(json.dumps(dict(activeAllocations=len(re.findall(r"id=\d+, user <", report)),
+        print(json.dumps(dict(serviceId=service_id, activeAllocations=len(re.findall(r"id=\d+, user <", report)),
                               receivedBytes=sum(int(rx) for rx, _ in usage),
                               sentBytes=sum(int(tx) for _, tx in usage))))
     else:
