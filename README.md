@@ -7,7 +7,9 @@
 1. **绑定自己的域名。** 例如，你拥有 `example.com`，可以添加一条 `A` 记录，名称填 `relay`，值填 VPS 的公网 IPv4。这样中转域名就是 `relay.example.com`。也可以直接使用根域名，记录名称填 `@`。该名称应只解析到这台 VPS 的公网 IPv4。使用 Cloudflare 时选择「仅 DNS」（灰云）。[Cloudflare DNS 说明](https://developers.cloudflare.com/dns/proxy-status/)
 2. **开放端口。** 使用有固定公网 IPv4 的 **Debian 13 VPS**，在云安全组和主机防火墙放行 **TCP 80、8443、5349** 与 **UDP 3478、49160–49259**，其中 UDP 端口范围需允许双向通信。保留 SSH 端口，并让 TCP 80 可用于证书签发和续期。
 
-等 DNS 生效后，通过 SSH 登录 VPS，把下面的 `relay.example.com` 换成刚绑定的域名。普通管理员和 root 均可运行。执行命令即同意向 Let’s Encrypt 申请公开证书并接受其[订户协议](https://letsencrypt.org/repository/)。
+等 DNS 生效后，通过 SSH 登录 VPS，先进入打算存放中转的**上级目录**。脚本会在当前目录创建或复用 `./vibedesk-relay/`，其中包含 `compose.yaml`、`.env` 和 `certs/`。例如从 `/root` 运行，安装位置就是 `/root/vibedesk-relay`。
+
+把下面的 `relay.example.com` 换成刚绑定的域名。普通管理员和 root 均可运行。执行命令即同意向 Let’s Encrypt 申请公开证书并接受其[订户协议](https://letsencrypt.org/repository/)。
 
 ```sh
 curl -fsSLo vibedesk-relay-install.sh https://raw.githubusercontent.com/ApeMotion/VibeDesk-Relay/main/install.sh && sh vibedesk-relay-install.sh relay.example.com
@@ -17,7 +19,7 @@ curl -fsSLo vibedesk-relay-install.sh https://raw.githubusercontent.com/ApeMotio
 
 **复制设备配置。** 安装完成后，VPS 终端会直接显示两段 JSON，分别标为「控制端」和「被控端」。为每台设备复制对应的一整段（从 `{` 到 `}`），在 VibeDesk「自建中转」中粘贴。如果当前客户端只有「导入配置」，将该段保存为纯文本 `.json` 文件后导入。每段都包含该设备的访问令牌，请只交给对应的设备持有人。同一域名和数据卷下重跑安装命令会再次显示已保存的两份配置。
 
-如果已经在 VPS 上克隆了本仓库，直接在仓库目录执行 `sh install.sh relay.example.com`，同样换成自己的域名。其他 Linux 发行版、已有网站占用 TCP 80，或希望自行管理证书时，可按[手动部署指南](docs/manual-install.md)操作。
+如果已经克隆了仓库，也可以在选定的上级目录执行 `sh /path/to/VibeDesk-Relay/install.sh relay.example.com`。从同一上级目录重跑，或进入已安装的 `vibedesk-relay/` 运行 `sh install.sh relay.example.com`，都会复用原安装。已有旧版部署请进入原来的安装目录操作。其他 Linux 发行版、已有网站占用 TCP 80，或希望自行管理证书时，可按[手动部署指南](docs/manual-install.md)操作。
 
 ## 连接两台 Mac
 
@@ -30,10 +32,10 @@ curl -fsSLo vibedesk-relay-install.sh https://raw.githubusercontent.com/ApeMotio
 
 ## 新增设备
 
-在 VPS 上执行下面这行，将 `MacBook-Air` 换成便于识别的设备名称。普通管理员如需提权，在 `docker` 前加 `sudo`。
+在 VPS 上从运行安装命令的上级目录执行下面这行，将 `MacBook-Air` 换成便于识别的设备名称。普通管理员如需提权，在 `docker` 前加 `sudo`。
 
 ```sh
-cd /opt/vibedesk-relay && docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "MacBook-Air"
+cd ./vibedesk-relay && docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "MacBook-Air"
 ```
 
 命令会直接输出新设备的完整 JSON。在新设备上粘贴或保存为 `.json` 后导入，启用并保存设置即可。每次执行都会签发独立授权，即使设备名称相同。
@@ -42,7 +44,7 @@ cd /opt/vibedesk-relay && docker compose exec -T relay python3 /opt/vibedesk/rel
 
 | 现象 | 检查方法 |
 | --- | --- |
-| 在 VPS 运行 Compose 提示 `no configuration file provided` | 先执行 `cd /opt/vibedesk-relay`。该目录包含 `compose.yaml` 和 `.env`，可在这里运行 `docker compose ps`、查看设备或日志。 |
+| 在 VPS 运行 Compose 提示 `no configuration file provided` | 进入安装完成时显示的 Compose 目录（从原上级目录执行 `cd ./vibedesk-relay`），再运行 `docker compose ps`、查看设备或日志。 |
 | HTTPS 健康检查失败 | 检查 DNS 指向、云防火墙 TCP 8443 和域名证书。运行 `docker compose logs --tail 80 relay` 查看启动错误。 |
 | 本机测试成功，两台设备连不上 | 确认两端使用同一台中转签发的**不同授权文件**，被控端允许中转连入，并从「互联网 P2P」分组发起连接。 |
 | 设备列表显示在线，连接时提示被控端离线 | 唤醒被控电脑并打开 VibeDesk。等正在使用的会话结束后，在被控端将「允许远程控制」关闭再打开，重新向协调服务注册，然后重试。 |
@@ -59,10 +61,10 @@ python3 check_access.py controller.vibedesk-relay.json --transport tls
 
 ## 维护、更新与备份
 
-在服务器上进入 `/opt/vibedesk-relay`，以有 Docker 管理权限的账号操作。前两条命令查看设备和使用情况；最后一条用于撤销指定设备，执行前将 `DEVICE_ID` 替换为 `list` 中的设备 ID。
+在 VPS 上从安装时的上级目录进入 `vibedesk-relay/`，使用有 Docker 管理权限的账号操作。前两条命令查看设备和使用情况；最后一条用于撤销指定设备，执行前将 `DEVICE_ID` 替换为 `list` 中的设备 ID。
 
 ```sh
-cd /opt/vibedesk-relay
+cd ./vibedesk-relay
 docker compose exec -T relay python3 /opt/vibedesk/relay.py list
 docker compose exec -T relay python3 /opt/vibedesk/relay.py status
 docker compose exec -T relay python3 /opt/vibedesk/relay.py revoke DEVICE_ID
@@ -72,6 +74,7 @@ docker compose exec -T relay python3 /opt/vibedesk/relay.py revoke DEVICE_ID
 - **容量**。默认最多 64 个同时活动的 TURN 分配，一次远控可能占用多个。可在 `.env` 里调整端口范围、分配数和带宽上限，改动后执行 `docker compose up -d`。实际费用以 VPS 提供商的账单为准。
 - **备份与恢复**。服务 ID、令牌摘要与撤权记录保存在 Compose 的 `relay-data` 命名卷中。先执行 `docker compose stop relay`，备份卷、`.env`、证书及其续期配置。一键安装还应备份 `/var/lib/vibedesk-relay/grants/` 中的设备授权，再执行 `docker compose start relay`。恢复时先停服，将原卷恢复到相同 Compose 项目并保留文件属主及权限，再启动。若恢复了较早备份，先补上之后的撤权记录再开放服务。全新数据卷会生成新的服务 ID；重跑安装命令后，复制新配置并在两台设备上重新导入。
 - **更新**。备份后运行 `git pull --ff-only` 和 `docker compose up -d --build`，复核健康检查和实际中转连接。升级或加载新证书重启服务时，进行中的中转会话可能中断。
+- **更换安装目录**。先在原目录运行 `docker compose down` 保留数据卷，再将整个安装目录（含 `.env` 与 `certs/`）移到新上级目录下，命名为 `vibedesk-relay`。从新上级目录用同一域名运行新版一键安装命令，重新绑定证书续期并启动原服务。
 - **停用**。`docker compose down` 会停止容器并保留授权数据。`docker compose down -v` 会删除数据卷，已有设备需重新授权。
 
 ## 本地测试

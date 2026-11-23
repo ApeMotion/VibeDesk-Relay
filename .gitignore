@@ -12,3 +12,4 @@ backups/
 *.sqlite*
 __pycache__/
 .DS_Store
+/vibedesk-relay/

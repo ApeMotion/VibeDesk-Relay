@@ -10,15 +10,21 @@ case "${1%.}" in
     *.*[a-zA-Z]*) ;;
     *) fail "$usage" ;;
 esac
+launch_dir=$(pwd -P)
 if [ "$(id -u)" -ne 0 ]; then
-    exec sudo -- sh "$0" "$@"
+    exec sudo -- sh -c 'cd -- "$1" && shift && exec sh "$@"' sh "$launch_dir" "$0" "$@"
 fi
 . /etc/os-release
 [ "$ID:$VERSION_ID" = debian:13 ] || fail '一键安装适用于 Debian 13。其他系统请参阅 README 的手动部署。'
 exec 9>/run/lock/vibedesk-relay-install.lock
 flock -n 9 || fail '另一项中转安装正在运行。'
 
-app=/opt/vibedesk-relay
+app=${launch_dir%/}/vibedesk-relay
+# Allow a rerun from the installed project as well as from its parent.
+if [ "${launch_dir##*/}" = vibedesk-relay ] && [ -f .env ] && [ -f compose.yaml ] && [ -f scripts/endpoint.py ]; then
+    app=$launch_dir
+fi
+app=$(realpath -m -- "$app")
 repo=https://github.com/ApeMotion/VibeDesk-Relay.git
 owner=${SUDO_USER:-root}
 owner_id=$(id -u "$owner")
@@ -38,7 +44,16 @@ if [ -n "$packages" ]; then
 fi
 systemctl enable --now docker.service certbot.timer
 docker compose version >/dev/null
-if [ ! -e "$app" ]; then
+installed=$(docker ps -a --last 1 --filter label=com.docker.compose.project=vibedesk-relay \
+    --filter label=com.docker.compose.service=relay --filter label=com.docker.compose.oneoff=False \
+    --format '{{.Label "com.docker.compose.project.working_dir"}}')
+if [ -n "$installed" ] && [ "$(realpath -m -- "$installed")" != "$app" ]; then
+    fail "本机已有中转安装在 $installed。请进入该目录重新运行安装脚本。"
+fi
+if [ ! -f "$app/compose.yaml" ] && [ ! -e "$app/.git" ]; then
+    # A sudo-created checkout must be traversable by the SSH user.
+    prior_mask=$(umask)
+    umask 022
     source_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
     if [ -e "$source_dir/.git" ] && [ -f "$source_dir/scripts/endpoint.py" ]; then
         git -c safe.directory="$source_dir" -c safe.directory="$source_dir/.git" \
@@ -47,14 +62,16 @@ if [ ! -e "$app" ]; then
     else
         git clone "$repo" "$app"
     fi
+    umask "$prior_mask"
 fi
 cd "$app"
-if [ ! -f scripts/endpoint.py ] && [ -d .git ]; then
-    case "$(git remote get-url origin)" in
-        "$repo"|git@github.com:ApeMotion/VibeDesk-Relay.git) git pull --ff-only ;;
+quoted_app=$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$app")
+if [ ! -f scripts/renew-cert.sh ] && [ -d .git ]; then
+    case "$(git -c safe.directory="$app" config --get remote.origin.url)" in
+        "$repo"|git@github.com:ApeMotion/VibeDesk-Relay.git) git -c safe.directory="$app" pull --ff-only ;;
     esac
 fi
-[ -f scripts/endpoint.py ] || fail "请将 $app 的 VibeDesk-Relay 仓库更新到包含一键安装的版本。"
+[ -f scripts/renew-cert.sh ] || fail "请将 $app 的 VibeDesk-Relay 仓库更新到支持当前安装脚本的版本。"
 endpoint=$(python3 scripts/endpoint.py "$1")
 domain=${endpoint% *}
 ip=${endpoint##* }
@@ -65,9 +82,7 @@ if [ -e .env ]; then
 fi
 
 lineage=/etc/letsencrypt/live/$domain
-if [ -s "$lineage/fullchain.pem" ]; then
-    certbot renew --cert-name "$domain" --non-interactive --no-random-sleep-on-renew
-elif [ ! -s certs/fullchain.pem ] || [ ! -s certs/privkey.pem ]; then
+if [ ! -s "$lineage/fullchain.pem" ] && { [ ! -s certs/fullchain.pem ] || [ ! -s certs/privkey.pem ]; }; then
     echo "正在为 $domain 申请证书。请保持 TCP 80 可访问。"
     certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email \
         --cert-name "$domain" -d "$domain"
@@ -81,22 +96,15 @@ if [ ! -e .env ]; then
     mv "$scratch/env" .env
 fi
 if [ -s "$lineage/fullchain.pem" ]; then
-    hooks=/etc/letsencrypt/renewal-hooks/deploy
-    install -d -m 0755 "$hooks"
-    cat > "$scratch/renew" <<HOOK
-#!/bin/sh
-[ "\$RENEWED_LINEAGE" = "$lineage" ] || exit 0
-exec $app/scripts/install-cert.sh
-HOOK
-    install -m 0755 "$scratch/renew" "$hooks/vibedesk-relay"
-    RENEWED_LINEAGE="$lineage" ./scripts/install-cert.sh
+    RENEWED_LINEAGE="$lineage" ./scripts/install-cert.sh --register
+    certbot renew --cert-name "$domain" --non-interactive --no-random-sleep-on-renew
 fi
 docker compose up -d --build
 echo '正在等待中转 HTTPS 服务启动…'
 if ! curl -fsS --retry 10 --retry-connrefused --retry-delay 2 --max-time 5 \
     --resolve "$domain:8443:127.0.0.1" "https://$domain:8443/healthz" >/dev/null 2>"$scratch/health.log"; then
     cat "$scratch/health.log" >&2
-    fail "HTTPS 健康检查失败。请在 VPS 运行：cd $app && docker compose logs --tail 80 relay"
+    fail "HTTPS 健康检查失败。请在 VPS 运行：cd $quoted_app && docker compose logs --tail 80 relay"
 fi
 
 relay() { docker compose exec -T relay python3 /opt/vibedesk/relay.py "$@"; }
@@ -138,8 +146,8 @@ python3 -m json.tool "$grants/host.vibedesk-relay.json"
 cat <<DONE
 
 新增设备时，在 VPS 执行以下命令，将 MacBook-Air 换成设备名称。每次执行都会签发并显示一份新授权。
-cd $app && docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "MacBook-Air"
+cd $quoted_app && docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "MacBook-Air"
 VPS 上的 Compose 目录：$app
-查看设备授权：cd $app && docker compose exec -T relay python3 /opt/vibedesk/relay.py list
+查看设备授权：cd $quoted_app && docker compose exec -T relay python3 /opt/vibedesk/relay.py list
 普通管理员如需提权，在 docker 前加 sudo。
 DONE

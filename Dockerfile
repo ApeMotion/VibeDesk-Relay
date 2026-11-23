@@ -5,11 +5,11 @@ USER root
 RUN apk add --no-cache python3 \
     && install -m 0755 /usr/bin/turnserver /usr/bin/turnserver.unprivileged \
     && mv /usr/bin/turnserver.unprivileged /usr/bin/turnserver \
-    && mkdir -p /data /opt/vibedesk \
+    && mkdir -p /data /opt/vibedesk/scripts /usr/share/licenses/vibedesk-relay \
     && chown 65534:65534 /data
-COPY relay.py check_access.py /opt/vibedesk/
-COPY scripts/endpoint.py /opt/vibedesk/scripts/
-COPY LICENSE /usr/share/licenses/vibedesk-relay/LICENSE
+COPY --chmod=0644 relay.py check_access.py /opt/vibedesk/
+COPY --chmod=0644 scripts/endpoint.py /opt/vibedesk/scripts/endpoint.py
+COPY --chmod=0644 LICENSE /usr/share/licenses/vibedesk-relay/LICENSE
 USER 65534:65534
 ENTRYPOINT ["python3", "/opt/vibedesk/relay.py"]
 CMD ["serve"]

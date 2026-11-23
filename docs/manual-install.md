@@ -4,19 +4,19 @@
 
 ## 安装并配置服务
 
-在服务器上以 root 执行下列命令。已有管理员账号可以先运行 `sudo -i`。Debian 13 提供 Docker 和 Compose 软件包。[Debian Compose 软件包](https://packages.debian.org/trixie/docker-compose)
+在服务器上以 root 执行下列命令。切换到 root 后，先进入计划存放中转的上级目录。Debian 13 提供 Docker 和 Compose 软件包。[Debian Compose 软件包](https://packages.debian.org/trixie/docker-compose)
 
 ```sh
 apt-get update
 apt-get install -y git curl ca-certificates docker.io docker-cli docker-compose docker-buildx certbot
 systemctl enable --now docker.service certbot.timer
 docker compose version
-git clone https://github.com/ApeMotion/VibeDesk-Relay.git /opt/vibedesk-relay
-cd /opt/vibedesk-relay
+git clone https://github.com/ApeMotion/VibeDesk-Relay.git ./vibedesk-relay
+cd ./vibedesk-relay
 cp .env.example .env
 ```
 
-编辑 `/opt/vibedesk-relay/.env`，将下面两项改成**自己的域名和公网 IPv4**。示例 IP 是文档专用地址。单网卡服务器通常可以让 `RELAY_LISTEN_IP` 留空；多网卡时可明确指定本机接收中转流量的网卡 IPv4。
+编辑当前安装目录中的 `.env`，将下面两项改成**自己的域名和公网 IPv4**。示例 IP 是文档专用地址。单网卡服务器通常可以让 `RELAY_LISTEN_IP` 留空；多网卡时可明确指定本机接收中转流量的网卡 IPv4。
 
 ```dotenv
 RELAY_DOMAIN=relay.example.com
@@ -27,20 +27,18 @@ RELAY_PUBLIC_IP=203.0.113.10
 
 ## 申请证书并启动
 
-以下命令在服务器的仓库目录执行，从刚填好的配置中读取域名。等 DNS 生效且 TCP 80 可用后，按 Certbot 的提示申请证书。仓库中的部署钩子会安装证书，并在续期成功后重启运行中的中转。[Certbot 续期说明](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates)
+以下命令在服务器的仓库目录执行，从刚填好的配置中读取域名。等 DNS 生效且 TCP 80 可用后，按 Certbot 的提示申请证书。随后注册部署钩子，将证书安装到当前项目，并在续期成功后重启运行中的中转。[Certbot 续期说明](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates)
 
 ```sh
-cd /opt/vibedesk-relay
 . ./.env
 docker compose config --quiet
-certbot certonly --standalone --cert-name "$RELAY_DOMAIN" -d "$RELAY_DOMAIN" \
-  --deploy-hook /opt/vibedesk-relay/scripts/install-cert.sh
+certbot certonly --standalone --cert-name "$RELAY_DOMAIN" -d "$RELAY_DOMAIN"
+RENEWED_LINEAGE="/etc/letsencrypt/live/$RELAY_DOMAIN" ./scripts/install-cert.sh --register
 ```
 
-如果同一台主机已有网站占用 TCP 80，可以沿用为该域名签发证书的现有流程。将它的完整证书链与私钥以 `fullchain.pem` 和 `privkey.pem` 放在同一目录，通过 `RENEWED_LINEAGE=/实际证书目录 /opt/vibedesk-relay/scripts/install-cert.sh` 安装，续期后再次调用。脚本将文件复制到 `certs/`，供容器内的用户 65534 读取。
+如果同一台主机已有网站占用 TCP 80，可以沿用为该域名签发证书的现有流程。将它的完整证书链与私钥以 `fullchain.pem` 和 `privkey.pem` 放在同一目录，通过 `RENEWED_LINEAGE=/实际证书目录 ./scripts/install-cert.sh` 安装，续期后再次调用。脚本将文件复制到 `certs/`，供容器内的用户 65534 读取。
 
 ```sh
-cd /opt/vibedesk-relay
 . ./.env
 test -s certs/fullchain.pem && test -s certs/privkey.pem && docker compose up -d --build
 docker compose ps
@@ -52,10 +50,9 @@ curl --fail --retry 8 --retry-connrefused --retry-delay 2 \
 
 ## 给两台设备分别授权
 
-在 VPS 上执行以下命令。第一条授权命令显示控制端的完整 JSON，第二条显示被控端的完整 JSON。每条命令每执行一次都会创建一份新授权。
+在 VPS 的中转安装目录执行以下命令。第一条授权命令显示控制端的完整 JSON，第二条显示被控端的完整 JSON。每条命令每执行一次都会创建一份新授权。
 
 ```sh
-cd /opt/vibedesk-relay
 docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "controller"
 docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "host"
 ```
