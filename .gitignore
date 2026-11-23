@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+certs/
+grants/
+backups/
+*.vibedesk-relay.json
+*.pem
+*.key
+*.sqlite*
+__pycache__/
+.DS_Store

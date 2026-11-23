@@ -1,0 +1,27 @@
+name: vibedesk-relay
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    init: true
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?Set your relay DNS name}
+      RELAY_PUBLIC_IP: ${RELAY_PUBLIC_IP:?Set the public IPv4 address}
+      RELAY_LISTEN_IP: ${RELAY_LISTEN_IP:-}
+      RELAY_TOTAL_QUOTA: ${RELAY_TOTAL_QUOTA:-64}
+      RELAY_MAX_BPS: ${RELAY_MAX_BPS:-4000000}
+      RELAY_CAPACITY: ${RELAY_CAPACITY:-64000000}
+      RELAY_MIN_PORT: ${RELAY_MIN_PORT:-49160}
+      RELAY_MAX_PORT: ${RELAY_MAX_PORT:-49259}
+    volumes:
+      - relay-data:/data
+      - ./certs:/certs:ro
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  relay-data:
