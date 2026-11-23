@@ -15,24 +15,33 @@ curl -fsSLo vibedesk-relay-install.sh https://raw.githubusercontent.com/ApeMotio
 
 脚本检查域名解析，安装 Docker Compose，为该域名申请证书并配置自动续期，启动中转，再生成两份使用该域名的设备授权。
 
-**取回授权**：安装完成后，复制终端最后给出的 `scp` 命令，在自己的 Mac 上运行。将 `controller.vibedesk-relay.json` 留给控制端，把 `host.vibedesk-relay.json` 通过隔空投送等私密方式交给被控端。若 SSH 使用自定义端口或私钥，给 `scp` 加上平时的 `-P 端口` 或 `-i 私钥路径`。同一数据卷重跑安装命令会保留同一对授权，也会再次显示取件命令。
+**复制设备配置。** 安装完成后，VPS 终端会直接显示两段 JSON，分别标为「控制端」和「被控端」。为每台设备复制对应的一整段（从 `{` 到 `}`），在 VibeDesk「自建中转」中粘贴。如果当前客户端只有「导入配置」，将该段保存为纯文本 `.json` 文件后导入。每段都包含该设备的访问令牌，请只交给对应的设备持有人。同一域名和数据卷下重跑安装命令会再次显示已保存的两份配置。
 
 如果已经在 VPS 上克隆了本仓库，直接在仓库目录执行 `sh install.sh relay.example.com`，同样换成自己的域名。其他 Linux 发行版、已有网站占用 TCP 80，或希望自行管理证书时，可按[手动部署指南](docs/manual-install.md)操作。
 
 ## 连接两台 Mac
 
-1. **两台设备**都打开「自建中转」→「导入配置」，各自选择自己的 JSON，勾选「启用此中转」。可先点「测试本机接入」检查设备授权。
+1. **两台设备**都打开「自建中转」，各自粘贴自己的 JSON 或选择「导入配置」打开文件，勾选「启用此中转」。可先点「测试本机接入」检查设备授权。
 2. **被控 Mac** 勾选「允许通过中转连入此电脑」并保存。在「允许远程控制」页面开启远控，按提示授予 macOS 权限，保持唤醒。
 3. **控制端 Mac** 把「公网连接策略」选为「仅中转」，保存。从设备列表的 **互联网 P2P** 分组选择被控电脑，按提示输入主机授权码并连接。
 4. **验收**：会话中显示 **「自建中转」和你的服务名称**。打开一个桌面或应用，确认能看到画面并操作。要验证跨网络效果，可以把一端切换到手机热点。
 
 配置协议为 v1。客户端需要提供「自建中转」设置，账号协调服务需要支持自建中转协商。控制端也可使用具备该功能的 iOS、iPadOS、Android 或 Windows 客户端；被控端使用支持远控的 macOS 或 Windows 客户端。
 
+## 新增设备
+
+在 VPS 上执行下面这行，将 `MacBook-Air` 换成便于识别的设备名称。普通管理员如需提权，在 `docker` 前加 `sudo`。
+
+```sh
+cd /opt/vibedesk-relay && docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "MacBook-Air"
+```
+
+命令会直接输出新设备的完整 JSON。在新设备上粘贴或保存为 `.json` 后导入，启用并保存设置即可。每次执行都会签发独立授权，即使设备名称相同。
+
 ## 连接问题
 
 | 现象 | 检查方法 |
 | --- | --- |
-| 取回配置时提示 `Permission denied (publickey)` | 在 Mac 上使用能登录 VPS 的 SSH 用户和地址。如果登录用 `ssh -i ~/.ssh/my_vps_key`，把取件命令中的 `scp -p` 改为 `scp -p -i ~/.ssh/my_vps_key`，换成自己的私钥路径。 |
 | 在 VPS 运行 Compose 提示 `no configuration file provided` | 先执行 `cd /opt/vibedesk-relay`。该目录包含 `compose.yaml` 和 `.env`，可在这里运行 `docker compose ps`、查看设备或日志。 |
 | HTTPS 健康检查失败 | 检查 DNS 指向、云防火墙 TCP 8443 和域名证书。运行 `docker compose logs --tail 80 relay` 查看启动错误。 |
 | 本机测试成功，两台设备连不上 | 确认两端使用同一台中转签发的**不同授权文件**，被控端允许中转连入，并从「互联网 P2P」分组发起连接。 |
@@ -61,7 +70,7 @@ docker compose exec -T relay python3 /opt/vibedesk/relay.py revoke DEVICE_ID
 
 - **撤权与轮换**。撤权会终止涉及该设备的中转分配。轮换时先签发新的设备配置，在设备上导入并验证，然后撤销旧设备 ID。
 - **容量**。默认最多 64 个同时活动的 TURN 分配，一次远控可能占用多个。可在 `.env` 里调整端口范围、分配数和带宽上限，改动后执行 `docker compose up -d`。实际费用以 VPS 提供商的账单为准。
-- **备份与恢复**。服务 ID、令牌摘要与撤权记录保存在 Compose 的 `relay-data` 命名卷中。先执行 `docker compose stop relay`，备份卷、`.env`、证书及其续期配置。一键安装还应备份 `/var/lib/vibedesk-relay/grants/` 中的设备授权，再执行 `docker compose start relay`。恢复时先停服，将原卷恢复到相同 Compose 项目并保留文件属主及权限，再启动。若恢复了较早备份，先补上之后的撤权记录再开放服务。全新数据卷会生成新的服务 ID；重跑安装命令后，取回新文件并在两台设备重新导入。
+- **备份与恢复**。服务 ID、令牌摘要与撤权记录保存在 Compose 的 `relay-data` 命名卷中。先执行 `docker compose stop relay`，备份卷、`.env`、证书及其续期配置。一键安装还应备份 `/var/lib/vibedesk-relay/grants/` 中的设备授权，再执行 `docker compose start relay`。恢复时先停服，将原卷恢复到相同 Compose 项目并保留文件属主及权限，再启动。若恢复了较早备份，先补上之后的撤权记录再开放服务。全新数据卷会生成新的服务 ID；重跑安装命令后，复制新配置并在两台设备上重新导入。
 - **更新**。备份后运行 `git pull --ff-only` 和 `docker compose up -d --build`，复核健康检查和实际中转连接。升级或加载新证书重启服务时，进行中的中转会话可能中断。
 - **停用**。`docker compose down` 会停止容器并保留授权数据。`docker compose down -v` 会删除数据卷，已有设备需重新授权。
 

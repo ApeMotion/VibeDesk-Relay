@@ -52,32 +52,12 @@ curl --fail --retry 8 --retry-connrefused --retry-delay 2 \
 
 ## 给两台设备分别授权
 
-**每台设备一份 JSON。** 以下命令在 VPS 上以你平时的 SSH 登录账号执行。如果之前用 `sudo -i` 切到了 root，先用 `exit` 回到原账号。授权文件保存在该账号的私有目录，管理员可用同一账号取回。同一服务重复执行时会保留已有文件。若已重建服务数据卷，先将旧的授权目录改名归档，以便生成与新服务匹配的文件。
+在 VPS 上执行以下命令。第一条授权命令显示控制端的完整 JSON，第二条显示被控端的完整 JSON。每条命令每执行一次都会创建一份新授权。
 
 ```sh
-umask 077
-grant_dir="$HOME/vibedesk-relay-grants"
-install -d -m 0700 "$grant_dir"
-if [ "$(id -u)" -eq 0 ]; then
-  compose() { docker compose "$@"; }
-else
-  compose() { sudo docker compose "$@"; }
-fi
-for device in controller host; do
-  file="$grant_dir/$device.vibedesk-relay.json"
-  if [ ! -s "$file" ]; then
-    compose --env-file /opt/vibedesk-relay/.env -f /opt/vibedesk-relay/compose.yaml \
-      exec -T relay python3 /opt/vibedesk/relay.py grant "$device" > "$file.tmp" &&
-      mv "$file.tmp" "$file"
-  fi
-done
+cd /opt/vibedesk-relay
+docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "controller"
+docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "host"
 ```
 
-在管理员自己的 Mac 上，使用刚才的 SSH 用户名和地址替换下方的 `admin@relay.example.com`。远程文件路径相对于该账号的家目录。两份文件取回后，将 `controller` 留给控制端，将 `host` 通过隔空投送等私密方式交给被控端。设备持有人只需要各自的文件。SSH 使用指定私钥时可给 `scp` 加上 `-i 私钥路径`。
-
-```sh
-dest="$HOME/Downloads/relay.example.com"
-mkdir -p -m 700 "$dest"
-scp -p admin@relay.example.com:vibedesk-relay-grants/controller.vibedesk-relay.json \
-       admin@relay.example.com:vibedesk-relay-grants/host.vibedesk-relay.json "$dest/"
-```
+从 VPS 终端复制属于该设备的整段 JSON，在对应设备的 VibeDesk「自建中转」中粘贴，或将其保存为纯文本 `.json` 文件后导入。以后每新增一台设备，用该设备的名称再执行一次 `grant`。两端的连接设置见[部署首页](../README.md#连接两台-mac)。

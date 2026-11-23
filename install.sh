@@ -128,11 +128,18 @@ done
 cat <<DONE
 
 中转已就绪：https://$domain:8443
+每台设备只复制自己那一段 JSON（从 { 到 }）。在 VibeDesk「自建中转」中粘贴，或存为 .json 文件后导入。
+
+控制端（controller.vibedesk-relay.json）
+DONE
+python3 -m json.tool "$grants/controller.vibedesk-relay.json"
+printf '\n被控端（host.vibedesk-relay.json）\n'
+python3 -m json.tool "$grants/host.vibedesk-relay.json"
+cat <<DONE
+
+新增设备时，在 VPS 执行以下命令，将 MacBook-Air 换成设备名称。每次执行都会签发并显示一份新授权。
+cd $app && docker compose exec -T relay python3 /opt/vibedesk/relay.py grant "MacBook-Air"
 VPS 上的 Compose 目录：$app
 查看设备授权：cd $app && docker compose exec -T relay python3 /opt/vibedesk/relay.py list
-
-在 Mac 上运行下一条命令取回两份配置。使用 SSH 别名或 IP 登录时，可将 $owner@$domain 换成平时的登录地址。
-若平时登录要用 ssh -i，先在下面的 scp -p 后加上相同的 -i 私钥路径；自定义 SSH 端口用 -P 端口。
-mkdir -p -m 700 ~/Downloads/$domain && scp -p $owner@$domain:$grants/controller.vibedesk-relay.json $owner@$domain:$grants/host.vibedesk-relay.json ~/Downloads/$domain/
-控制端导入 controller，被控端导入 host；两台 Mac 各用自己的文件。
+普通管理员如需提权，在 docker 前加 sudo。
 DONE
