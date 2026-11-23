@@ -2,4 +2,7 @@
 !Dockerfile
 !relay.py
 !check_access.py
+!scripts/
+scripts/*
+!scripts/endpoint.py
 !LICENSE

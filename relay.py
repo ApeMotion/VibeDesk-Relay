@@ -22,6 +22,8 @@ import threading
 import time
 import uuid
 
+from scripts.endpoint import domain_name
+
 ROOT = Path(os.environ.get("RELAY_STATE", "/data"))
 REALM = "vibedesk"
 LEASE = 600
@@ -65,9 +67,9 @@ def initialize():
 
 def domain():
     value = os.environ["RELAY_DOMAIN"].lower()
-    if len(value) > 253 or not all(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", part) for part in value.split(".")):
-        raise ValueError("Invalid RELAY_DOMAIN")
-    return value
+    if value == "localhost" and os.environ.get("RELAY_LOCAL_TEST") == "1":
+        return value
+    return domain_name(value)
 
 
 def grant(label):

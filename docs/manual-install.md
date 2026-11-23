@@ -23,6 +23,8 @@ RELAY_DOMAIN=relay.example.com
 RELAY_PUBLIC_IP=203.0.113.10
 ```
 
+旧部署若在 `RELAY_DOMAIN` 填了纯 IP，升级前先将它改为已绑定的域名，并按下节安装与域名匹配的证书。归档旧的设备授权 JSON，再按「给两台设备分别授权」生成新配置，分别导入两台设备。
+
 ## 申请证书并启动
 
 以下命令在服务器的仓库目录执行，从刚填好的配置中读取域名。等 DNS 生效且 TCP 80 可用后，按 Certbot 的提示申请证书。仓库中的部署钩子会安装证书，并在续期成功后重启运行中的中转。[Certbot 续期说明](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates)

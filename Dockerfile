@@ -8,6 +8,7 @@ RUN apk add --no-cache python3 \
     && mkdir -p /data /opt/vibedesk \
     && chown 65534:65534 /data
 COPY relay.py check_access.py /opt/vibedesk/
+COPY scripts/endpoint.py /opt/vibedesk/scripts/
 COPY LICENSE /usr/share/licenses/vibedesk-relay/LICENSE
 USER 65534:65534
 ENTRYPOINT ["python3", "/opt/vibedesk/relay.py"]

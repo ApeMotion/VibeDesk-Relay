@@ -2,7 +2,14 @@
 # Deploy the public relay on a Debian 13 VPS. Run as the SSH user or root.
 set -eu
 fail() { echo "$*" >&2; exit 1; }
-[ "$#" -eq 1 ] || fail '用法：sh install.sh VPS公网IPv4或域名'
+usage='用法：sh install.sh relay.example.com（请替换为已指向 VPS 的自有域名）'
+[ "$#" -eq 1 ] || fail "$usage"
+# Reject IPs and URLs before asking for sudo or installing packages.
+case "${1%.}" in
+    *[!a-zA-Z0-9.-]*|*.) fail "$usage" ;;
+    *.*[a-zA-Z]*) ;;
+    *) fail "$usage" ;;
+esac
 if [ "$(id -u)" -ne 0 ]; then
     exec sudo -- sh "$0" "$@"
 fi
@@ -53,7 +60,7 @@ domain=${endpoint% *}
 ip=${endpoint##* }
 if [ -e .env ]; then
     configuration=$(docker compose config --format json)
-    existing=$(printf '%s\n' "$configuration" | python3 -c 'import json,sys; e=json.load(sys.stdin)["services"]["relay"]["environment"]; print(e["RELAY_DOMAIN"].lower(), e["RELAY_PUBLIC_IP"])')
+    existing=$(printf '%s\n' "$configuration" | python3 -c 'import json,sys; e=json.load(sys.stdin)["services"]["relay"]["environment"]; print(e["RELAY_DOMAIN"].lower().removesuffix("."), e["RELAY_PUBLIC_IP"])')
     [ "$existing" = "$endpoint" ] || fail "已有部署使用 $existing。如需迁移请先备份并检查 $app/.env。"
 fi
 

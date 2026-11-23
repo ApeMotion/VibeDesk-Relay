@@ -4,19 +4,20 @@
 
 ## 一条命令部署
 
-准备一台有固定公网 IPv4 的 **Debian 13 VPS**。在云安全组和主机防火墙放行 **TCP 80、8443、5349** 与 **UDP 3478、49160–49259**，其中 UDP 端口范围需允许双向通信。保留 SSH 端口，并让 TCP 80 可用于证书签发和续期。
+1. **绑定自己的域名。** 例如，你拥有 `example.com`，可以添加一条 `A` 记录，名称填 `relay`，值填 VPS 的公网 IPv4。这样中转域名就是 `relay.example.com`。也可以直接使用根域名，记录名称填 `@`。该名称应只解析到这台 VPS 的公网 IPv4。使用 Cloudflare 时选择「仅 DNS」（灰云）。[Cloudflare DNS 说明](https://developers.cloudflare.com/dns/proxy-status/)
+2. **开放端口。** 使用有固定公网 IPv4 的 **Debian 13 VPS**，在云安全组和主机防火墙放行 **TCP 80、8443、5349** 与 **UDP 3478、49160–49259**，其中 UDP 端口范围需允许双向通信。保留 SSH 端口，并让 TCP 80 可用于证书签发和续期。
 
-通过 SSH 登录 VPS，**把命令末尾的 `你的VPS公网IPv4` 换成实际 IP** 后执行。普通管理员和 root 均可运行。执行命令即同意由脚本向 Let’s Encrypt 申请公开证书并接受其[订户协议](https://letsencrypt.org/repository/)。
+等 DNS 生效后，通过 SSH 登录 VPS，把下面的 `relay.example.com` 换成刚绑定的域名。普通管理员和 root 均可运行。执行命令即同意向 Let’s Encrypt 申请公开证书并接受其[订户协议](https://letsencrypt.org/repository/)。
 
 ```sh
-curl -fsSLo vibedesk-relay-install.sh https://raw.githubusercontent.com/ApeMotion/VibeDesk-Relay/main/install.sh && sh vibedesk-relay-install.sh 你的VPS公网IPv4
+curl -fsSLo vibedesk-relay-install.sh https://raw.githubusercontent.com/ApeMotion/VibeDesk-Relay/main/install.sh && sh vibedesk-relay-install.sh relay.example.com
 ```
 
-脚本安装 Docker Compose，启动中转，配置证书自动续期，并生成两份设备授权。填写 IP 会自动使用指向它的 `sslip.io` 域名，无需买域名或设置 DNS。已有域名也可以直接填在命令末尾，只需将一条 A 记录指向 VPS；Cloudflare 选择「仅 DNS」。共享域名遇到签发限额时可改用自己的域名。[自动域名服务说明](https://nip.io/)
+脚本检查域名解析，安装 Docker Compose，为该域名申请证书并配置自动续期，启动中转，再生成两份使用该域名的设备授权。
 
 **取回授权**：安装完成后，复制终端最后给出的 `scp` 命令，在自己的 Mac 上运行。将 `controller.vibedesk-relay.json` 留给控制端，把 `host.vibedesk-relay.json` 通过隔空投送等私密方式交给被控端。若 SSH 使用自定义端口或私钥，给 `scp` 加上平时的 `-P 端口` 或 `-i 私钥路径`。同一数据卷重跑安装命令会保留同一对授权，也会再次显示取件命令。
 
-如果已经在 VPS 上克隆了本仓库，直接在仓库目录执行 `sh install.sh 你的VPS公网IPv4` 即可。其他 Linux 发行版、已有网站占用 TCP 80，或希望自行管理证书时，可按[手动部署指南](docs/manual-install.md)操作。
+如果已经在 VPS 上克隆了本仓库，直接在仓库目录执行 `sh install.sh relay.example.com`，同样换成自己的域名。其他 Linux 发行版、已有网站占用 TCP 80，或希望自行管理证书时，可按[手动部署指南](docs/manual-install.md)操作。
 
 ## 连接两台 Mac
 
